@@ -19,6 +19,21 @@ except (KeyError, FileNotFoundError):
 
 st.title("Sistem Konversi Dokumen Terpadu 🚀")
 st.write("Platform multi-format berbasis Microservices yang aman, gratis, dan efisien.")
+# --- MODUL DIAGNOSTIK KEAMANAN (DEBUGGING) ---
+st.write("---")
+st.markdown("### 🛠️ Mode Diagnostik Server")
+if "CONVERTAPI_SECRET" in st.secrets:
+    secret_val = str(st.secrets["CONVERTAPI_SECRET"])
+    st.success("✅ Status: Kunci Rahasia BERHASIL TERDETEKSI di brankas server.")
+    
+    # Menampilkan hanya 4 karakter awal dan akhir untuk audit tanpa membocorkan kunci
+    if len(secret_val) > 10:
+        st.info(f"Audit Kunci Terbaca: {secret_val[:4]}••••••••••••••••{secret_val[-4:]}")
+    else:
+        st.warning("⚠️ Kunci terdeteksi, namun sepertinya format teks terlalu pendek (tidak valid).")
+else:
+    st.error("❌ Status: Kunci Rahasia TIDAK TERDETEKSI. Server buta terhadap konfigurasi Secrets Anda.")
+st.write("---")
 
 # --- 2. ROUTER (DISPATCHER) UI ---
 conversion_type = st.selectbox(
