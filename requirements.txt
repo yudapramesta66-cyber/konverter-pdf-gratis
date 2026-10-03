@@ -1,2 +1,5 @@
 streamlit
 pdf2docx
+Pillow
+pandas
+openpyxl

@@ -1,61 +1,120 @@
 import streamlit as st
-from pdf2docx import Converter
 import tempfile
 import os
+from pdf2docx import Converter
+from PIL import Image
+import pandas as pd
 
-# --- PENGATURAN UI & UX ---
-st.set_page_config(page_title="Konverter PDF Gratis", page_icon="📄", layout="centered")
+# --- KONFIGURASI ARSITEKTUR UI ---
+st.set_page_config(page_title="Sistem Multi-Konverter", page_icon="🗂️", layout="centered")
+st.title("Sistem Konversi Dokumen Terpadu 🚀")
+st.write("Platform multi-format yang aman, gratis, dan efisien.")
 
-st.title("Sistem Konversi Dokumen 🚀")
-st.write("Aplikasi sederhana untuk mengubah file PDF menjadi Microsoft Word (.docx) secara gratis dan aman.")
+# --- ROUTER (DISPATCHER) UI ---
+# Menggunakan pola state-management untuk mengubah UI berdasarkan pilihan user
+conversion_type = st.selectbox(
+    "Pilih Jenis Konversi:",
+    (
+        "PDF ke Word (.docx)", 
+        "Gambar (JPG/PNG) ke PDF", 
+        "CSV ke Excel (.xlsx)", 
+        "Excel (.xlsx) ke CSV"
+    )
+)
+
+# Menyesuaikan filter uploader berdasarkan pilihan di atas
+if conversion_type == "PDF ke Word (.docx)":
+    accepted_types = ["pdf"]
+elif conversion_type == "Gambar (JPG/PNG) ke PDF":
+    accepted_types = ["png", "jpg", "jpeg"]
+elif conversion_type == "CSV ke Excel (.xlsx)":
+    accepted_types = ["csv"]
+else:
+    accepted_types = ["xlsx"]
 
 # --- KOMPONEN INPUT ---
-uploaded_file = st.file_uploader("Silakan unggah file PDF Anda", type=["pdf"])
+uploaded_file = st.file_uploader(f"Unggah file {accepted_types} Anda", type=accepted_types)
 
-# --- LOGIKA VALIDASI & PROSES ---
+# --- FUNGSI-FUNGSI BISNIS (LOGIC LAYER) ---
+# Pendekatan Clean Code: Setiap fungsi hanya melakukan SATU tugas spesifik (SOLID Principle)
+
+def convert_pdf_to_docx(input_path, output_path):
+    cv = Converter(input_path)
+    cv.convert(output_path)
+    cv.close()
+
+def convert_image_to_pdf(input_path, output_path):
+    image = Image.open(input_path)
+    # Ubah mode ke RGB (karena PDF tidak mendukung format RGBA/Transparan secara langsung)
+    rgb_image = image.convert('RGB')
+    rgb_image.save(output_path)
+
+def convert_csv_to_excel(input_path, output_path):
+    df = pd.read_csv(input_path)
+    df.to_excel(output_path, index=False, engine='openpyxl')
+
+def convert_excel_to_csv(input_path, output_path):
+    df = pd.read_excel(input_path)
+    df.to_csv(output_path, index=False)
+
+# --- CONTROLLER & EKSEKUSI ---
 if uploaded_file is not None:
-    st.success(f"File '{uploaded_file.name}' berhasil diterima sistem!")
-    
-    # Validasi ukuran file (Max 10 MB)
-    file_size = uploaded_file.size
-    if file_size > 10 * 1024 * 1024:
-        st.error("Gagal: Ukuran file melebihi batas 10MB.")
+    # Validasi Skalabilitas: Cek batas memori 10MB
+    if uploaded_file.size > 10 * 1024 * 1024:
+        st.error("Keamanan Sistem: Ukuran file melebihi kapasitas maksimal (10MB) untuk mencegah server crash.")
     else:
-        st.info("Memulai proses konversi... Mohon tunggu sebentar.")
+        st.info(f"Memproses konversi {conversion_type}...")
         
-        # --- BLOK EKSEKUSI KONVERSI ---
         try:
-            # 1. Buat file sementara (Temporary File) yang aman untuk PDF
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_pdf:
-                tmp_pdf.write(uploaded_file.getvalue())
-                pdf_path = tmp_pdf.name
+            # 1. Alokasi Penyimpanan Sementara (Aman dari bentrok antar-user)
+            file_ext = "." + uploaded_file.name.split('.')[-1]
+            with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_input:
+                tmp_input.write(uploaded_file.getvalue())
+                input_path = tmp_input.name
             
-            # 2. Tentukan nama dan lokasi file hasil (.docx)
-            docx_path = pdf_path.replace(".pdf", ".docx")
+            # 2. Routing Tujuan Output
+            if conversion_type == "PDF ke Word (.docx)":
+                output_ext = ".docx"
+                mime_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            elif conversion_type == "Gambar (JPG/PNG) ke PDF":
+                output_ext = ".pdf"
+                mime_type = "application/pdf"
+            elif conversion_type == "CSV ke Excel (.xlsx)":
+                output_ext = ".xlsx"
+                mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            else:
+                output_ext = ".csv"
+                mime_type = "text/csv"
+                
+            output_path = input_path.replace(file_ext, output_ext)
             
-            # 3. Mesin Konversi Bekerja
-            cv = Converter(pdf_path)
-            cv.convert(docx_path)
-            cv.close()
+            # 3. Dispatcher Logika Konversi
+            if conversion_type == "PDF ke Word (.docx)":
+                convert_pdf_to_docx(input_path, output_path)
+            elif conversion_type == "Gambar (JPG/PNG) ke PDF":
+                convert_image_to_pdf(input_path, output_path)
+            elif conversion_type == "CSV ke Excel (.xlsx)":
+                convert_csv_to_excel(input_path, output_path)
+            else:
+                convert_excel_to_csv(input_path, output_path)
             
-            # 4. Baca hasil konversi ke dalam memori untuk tombol unduh
-            with open(docx_path, "rb") as docx_file:
-                docx_bytes = docx_file.read()
+            # 4. Penyiapan Unduhan
+            with open(output_path, "rb") as f:
+                output_bytes = f.read()
                 
             st.success("Konversi Berhasil! 🎉")
             
-            # 5. Tampilkan Tombol Unduh
+            final_filename = uploaded_file.name.rsplit('.', 1)[0] + output_ext
             st.download_button(
-                label="Unduh File Word (.docx)",
-                data=docx_bytes,
-                file_name=uploaded_file.name.replace(".pdf", ".docx"),
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                label=f"Unduh {final_filename}",
+                data=output_bytes,
+                file_name=final_filename,
+                mime=mime_type
             )
             
-            # 6. Housekeeping: Hapus file dari server agar tidak memakan storage
-            os.remove(pdf_path)
-            os.remove(docx_path)
+            # 5. Keamanan: Housekeeping (Pembersihan storage)
+            os.remove(input_path)
+            os.remove(output_path)
             
         except Exception as e:
-            # Menangkap dan menampilkan error jika file rusak atau tidak bisa diproses
-            st.error(f"Terjadi kesalahan saat mengonversi file: {e}")
+            st.error(f"Kesalahan Sistem: File rusak atau format tidak kompatibel. Detail: {e}")
