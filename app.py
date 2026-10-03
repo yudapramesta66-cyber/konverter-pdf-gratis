@@ -6,13 +6,21 @@ from PIL import Image
 import pandas as pd
 import convertapi
 
-# --- 1. KONFIGURASI ARSITEKTUR UI ---
+# --- 1. KONFIGURASI ARSITEKTUR UI & KEAMANAN (GLOBAL) ---
 st.set_page_config(page_title="Sistem Multi-Konverter", page_icon="🗂️", layout="centered")
+
+# [REFACTORING ARSITEKTUR]: Manajemen Kredensial Global
+# Menarik kunci rahasia di awal siklus hidup sistem untuk mencegah instansiasi NoneType pada library.
+try:
+    # Menggunakan fungsi str() untuk memaksa (Type Casting) nilai menjadi teks
+    convertapi.api_secret = str(st.secrets["CONVERTAPI_SECRET"])
+except (KeyError, FileNotFoundError):
+    convertapi.api_secret = None # Dibiarkan kosong, akan ditangkap oleh fungsi logika di bawah
+
 st.title("Sistem Konversi Dokumen Terpadu 🚀")
 st.write("Platform multi-format berbasis Microservices yang aman, gratis, dan efisien.")
 
 # --- 2. ROUTER (DISPATCHER) UI ---
-# State management untuk filter ekstensi file dinamis
 conversion_type = st.selectbox(
     "Pilih Jenis Konversi:",
     (
@@ -38,7 +46,6 @@ else:
 uploaded_file = st.file_uploader(f"Unggah file Anda (Format: {', '.join(accepted_types)})", type=accepted_types)
 
 # --- 3. FUNGSI BISNIS (LOGIC LAYER) ---
-# Pendekatan SOLID: Setiap fungsi memiliki satu tanggung jawab spesifik
 
 def convert_pdf_to_docx(input_path, output_path):
     cv = Converter(input_path)
@@ -47,20 +54,19 @@ def convert_pdf_to_docx(input_path, output_path):
 
 def convert_docx_to_pdf(input_path, output_path):
     """
-    Integrasi API Pihak Ketiga (ConvertAPI).
-    Mengambil kunci secara dinamis dari brankas server.
+    Integrasi API Pihak Ketiga (Microservice).
+    Menerapkan Defensive Programming untuk memvalidasi ketersediaan Kunci Rahasia.
     """
-    try:
-        convertapi.api_secret = st.secrets["CONVERTAPI_SECRET"]
-        # API Call ke server eksternal
-        result = convertapi.convert('pdf', {'File': input_path}, from_format='docx')
-        result.save_files(output_path)
-    except KeyError:
-        raise Exception("API Token tidak ditemukan di brankas sistem (Streamlit Secrets).")
+    # Analisis Keamanan Lapisan 2: Memblokir eksekusi jika kunci tidak valid
+    if not convertapi.api_secret or convertapi.api_secret == "None":
+        raise ValueError("API Token tidak terbaca oleh sistem. Pastikan Anda telah mengklik 'Save changes' di menu Secrets Streamlit Cloud.")
+    
+    # Eksekusi HTTP Request ke server pihak ketiga
+    result = convertapi.convert('pdf', {'File': input_path}, from_format='docx')
+    result.save_files(output_path)
 
 def convert_image_to_pdf(input_path, output_path):
     image = Image.open(input_path)
-    # Konversi ke RGB untuk mencegah error pada gambar berlatar transparan (RGBA)
     rgb_image = image.convert('RGB')
     rgb_image.save(output_path)
 
@@ -74,20 +80,20 @@ def convert_excel_to_csv(input_path, output_path):
 
 # --- 4. CONTROLLER & EKSEKUSI ---
 if uploaded_file is not None:
-    # Keamanan: Mencegah Memory Exhaustion (Batas 10MB)
+    # Skalabilitas & Keamanan: Mencegah serangan memori (Denial of Service)
     if uploaded_file.size > 10 * 1024 * 1024:
-        st.error("Gagal: Ukuran file melebihi kapasitas maksimal (10MB).")
+        st.error("Gagal: Ukuran file melebihi kapasitas maksimal server (10MB).")
     else:
         st.info(f"Memproses {conversion_type}... Mohon tunggu.")
         
         try:
-            # Alokasi penyimpanan sementara di server
+            # Manajemen File Sementara
             file_ext = "." + uploaded_file.name.split('.')[-1]
             with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as tmp_input:
                 tmp_input.write(uploaded_file.getvalue())
                 input_path = tmp_input.name
             
-            # Penentuan meta-data output
+            # Penentuan Format Output
             if conversion_type == "PDF ke Word (.docx)":
                 output_ext, mime_type = ".docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             elif conversion_type in ["Word (.docx) ke PDF", "Gambar (JPG/PNG) ke PDF"]:
@@ -99,7 +105,7 @@ if uploaded_file is not None:
                 
             output_path = input_path.replace(file_ext, output_ext)
             
-            # Eksekusi rute konversi
+            # Eksekusi Mesin Konversi
             if conversion_type == "PDF ke Word (.docx)":
                 convert_pdf_to_docx(input_path, output_path)
             elif conversion_type == "Word (.docx) ke PDF":
@@ -111,7 +117,7 @@ if uploaded_file is not None:
             else:
                 convert_excel_to_csv(input_path, output_path)
             
-            # Persiapan file untuk diunduh client
+            # Persiapan Unduhan
             with open(output_path, "rb") as f:
                 output_bytes = f.read()
                 
@@ -119,15 +125,17 @@ if uploaded_file is not None:
             
             final_filename = uploaded_file.name.rsplit('.', 1)[0] + output_ext
             st.download_button(
-                label=f"Unduh {final_filename}",
+                label=f"Unduh File Anda",
                 data=output_bytes,
                 file_name=final_filename,
                 mime=mime_type
             )
             
-            # Housekeeping: Hapus file fisik dari server
+            # Manajemen Memori: Penghapusan File Fisik
             os.remove(input_path)
             os.remove(output_path)
             
+        except ValueError as ve:
+            st.error(f"Peringatan Keamanan: {ve}")
         except Exception as e:
-            st.error(f"Kesalahan Sistem: {e}")
+            st.error(f"Kesalahan Sistem internal: {e}")
