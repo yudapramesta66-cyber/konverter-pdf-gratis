@@ -3,4 +3,3 @@ pdf2docx
 Pillow
 pandas
 openpyxl
-convertapi
